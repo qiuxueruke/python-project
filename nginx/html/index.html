@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>fastapi-app</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f1ea;
+        --ink: #1c1915;
+        --muted: #6b645c;
+        --line: #e4ddd2;
+        --card: #fffdf8;
+        --accent: #0f6e56;
+        --accent-ink: #f7fffb;
+        --danger: #9f2d2d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 28px;
+        border-bottom: 1px solid var(--line);
+      }
+      h1 { margin: 0; font-size: 20px; font-weight: 650; }
+      main { max-width: 880px; margin: 0 auto; padding: 28px 20px 48px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 16px;
+      }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; }
+      label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 6px; }
+      input, textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font: inherit;
+        background: #fff;
+      }
+      textarea { min-height: 72px; resize: vertical; }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font: inherit;
+        cursor: pointer;
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+      button.danger { background: transparent; color: var(--danger); border: 1px solid #efc7c7; }
+      .tabs { display: flex; gap: 8px; margin-bottom: 8px; }
+      .tabs button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+      .muted { color: var(--muted); font-size: 13px; }
+      .error { color: var(--danger); min-height: 1.2em; font-size: 13px; }
+      .item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 0;
+        border-top: 1px solid var(--line);
+      }
+      .item.read { opacity: 0.55; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>fastapi-app</h1>
+      <button id="logout" class="ghost hidden" type="button">退出</button>
+    </header>
+    <main>
+      <section id="auth" class="card">
+        <div class="tabs">
+          <button id="tab-login" type="button" aria-pressed="true">登录</button>
+          <button id="tab-register" class="ghost" type="button" aria-pressed="false">注册</button>
+        </div>
+        <form id="auth-form">
+          <label for="username">用户名</label>
+          <input id="username" name="username" autocomplete="username" required />
+          <label for="password">密码</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+          <p class="error" id="auth-error"></p>
+          <button id="auth-submit" type="submit">登录</button>
+        </form>
+      </section>
+
+      <section id="app" class="hidden">
+        <div class="card">
+          <h2 style="margin-top:0">我的资料</h2>
+          <p class="muted" id="user-meta"></p>
+          <form id="profile-form">
+            <label for="nickname">昵称</label>
+            <input id="nickname" name="nickname" />
+            <label for="email">邮箱</label>
+            <input id="email" name="email" type="email" />
+            <p class="error" id="profile-error"></p>
+            <button type="submit">保存</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2 style="margin-top:0">通知</h2>
+          <form id="note-form">
+            <label for="title">标题</label>
+            <input id="title" name="title" required />
+            <label for="content">内容</label>
+            <textarea id="content" name="content" required></textarea>
+            <p class="error" id="note-error"></p>
+            <button type="submit">发给自己</button>
+          </form>
+          <div id="notes"></div>
+        </div>
+      </section>
+    </main>
+    <script>
+      const tokenKey = "fastapi_token";
+      let mode = "login";
+      let me = null;
+
+      const $ = (id) => document.getElementById(id);
+
+      function token() {
+        return localStorage.getItem(tokenKey) || "";
+      }
+
+      async function api(path, options = {}) {
+        const headers = { ...(options.headers || {}) };
+        if (options.body) headers["Content-Type"] = "application/json";
+        if (token()) headers.Authorization = "Bearer " + token();
+        const res = await fetch(path, { ...options, headers });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail;
+          throw new Error(typeof detail === "string" ? detail : "请求失败");
+        }
+        return data;
+      }
+
+      function showApp(loggedIn) {
+        $("auth").classList.toggle("hidden", loggedIn);
+        $("app").classList.toggle("hidden", !loggedIn);
+        $("logout").classList.toggle("hidden", !loggedIn);
+      }
+
+      function setMode(next) {
+        mode = next;
+        const login = next === "login";
+        $("tab-login").setAttribute("aria-pressed", String(login));
+        $("tab-register").setAttribute("aria-pressed", String(!login));
+        $("tab-login").classList.toggle("ghost", !login);
+        $("tab-register").classList.toggle("ghost", login);
+        $("auth-submit").textContent = login ? "登录" : "注册";
+        $("auth-error").textContent = "";
+      }
+
+      async function loadMe() {
+        me = await api("/api/users/me");
+        $("user-meta").textContent = "用户名 " + me.username + " · ID " + me.id;
+        $("nickname").value = me.nickname || "";
+        $("email").value = me.email || "";
+      }
+
+      function renderNotes(items) {
+        const box = $("notes");
+        box.replaceChildren();
+        if (!items.length) {
+          const p = document.createElement("p");
+          p.className = "muted";
+          p.textContent = "还没有通知";
+          box.append(p);
+          return;
+        }
+        for (const item of items) {
+          const row = document.createElement("div");
+          row.className = "item" + (item.is_read ? " read" : "");
+          const text = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = item.title;
+          const body = document.createElement("div");
+          body.textContent = item.content;
+          text.append(title, body);
+          row.append(text);
+          if (!item.is_read) {
+            const btn = document.createElement("button");
+            btn.className = "ghost";
+            btn.type = "button";
+            btn.textContent = "标为已读";
+            btn.addEventListener("click", async () => {
+              await api("/api/notifications/" + item.id + "/read", { method: "POST" });
+              await loadNotes();
+            });
+            row.append(btn);
+          }
+          box.append(row);
+        }
+      }
+
+      async function loadNotes() {
+        renderNotes(await api("/api/notifications"));
+      }
+
+      async function boot() {
+        if (!token()) {
+          showApp(false);
+          return;
+        }
+        try {
+          await loadMe();
+          await loadNotes();
+          showApp(true);
+        } catch {
+          localStorage.removeItem(tokenKey);
+          showApp(false);
+        }
+      }
+
+      $("tab-login").addEventListener("click", () => setMode("login"));
+      $("tab-register").addEventListener("click", () => setMode("register"));
+
+      $("auth-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("auth-error").textContent = "";
+        const payload = {
+          username: $("username").value.trim(),
+          password: $("password").value,
+        };
+        try {
+          if (mode === "register") {
+            await api("/api/auth/register", { method: "POST", body: JSON.stringify(payload) });
+          }
+          const data = await api("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
+          localStorage.setItem(tokenKey, data.access_token);
+          await loadMe();
+          await loadNotes();
+          showApp(true);
+        } catch (err) {
+          $("auth-error").textContent = err.message;
+        }
+      });
+
+      $("profile-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("profile-error").textContent = "";
+        try {
+          me = await api("/api/users/me", {
+            method: "PATCH",
+            body: JSON.stringify({
+              nickname: $("nickname").value.trim() || null,
+              email: $("email").value.trim() || null,
+            }),
+          });
+          $("user-meta").textContent = "已保存 · 用户名 " + me.username;
+        } catch (err) {
+          $("profile-error").textContent = err.message;
+        }
+      });
+
+      $("note-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("note-error").textContent = "";
+        try {
+          await api("/api/notifications", {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: me.id,
+              title: $("title").value.trim(),
+              content: $("content").value.trim(),
+            }),
+          });
+          $("title").value = "";
+          $("content").value = "";
+          await loadNotes();
+        } catch (err) {
+          $("note-error").textContent = err.message;
+        }
+      });
+
+      $("logout").addEventListener("click", async () => {
+        try { await api("/api/auth/logout", { method: "POST" }); } catch { /* ignore */ }
+        localStorage.removeItem(tokenKey);
+        me = null;
+        showApp(false);
+      });
+
+      boot();
+    </script>
+  </body>
+</html>
