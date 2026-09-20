@@ -1,0 +1,11 @@
+# API only. MySQL, Redis, and Nginx are already running on the server.
+services:
+  api:
+    build: .
+    image: fastapi-app:latest
+    container_name: fastapi
+    restart: always
+    network_mode: host
+    environment:
+      DATABASE_URL: mysql+pymysql://root:MyStrongP%40ss123@127.0.0.1:3306/fastapi_app
+      REDIS_URL: redis://:MyRedisP%40ss123@127.0.0.1:6379/0
