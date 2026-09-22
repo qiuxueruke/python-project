@@ -34,6 +34,8 @@ class User(Base):
     nickname: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 邮箱，可空。
     email: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # 头像 URL，可空。
+    avatar: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # 创建时间，由数据库在插入时填当前时间。
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

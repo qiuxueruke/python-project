@@ -4,9 +4,13 @@
 get_settings() 用 lru_cache 缓存，整个进程只解析一次。 """
 # lru_cache 用来缓存 get_settings() 的结果，避免重复解析配置。
 from functools import lru_cache
+from pathlib import Path
 
 # BaseSettings 从环境变量和 .env 读取配置；SettingsConfigDict 配置读取行为。
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# fastapi_app 包根目录（含 static/）。
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
@@ -34,6 +38,36 @@ class Settings(BaseSettings):
 
     # 访问令牌有效期，默认 24 小时（60 * 24 分钟）。
     access_token_expire_minutes: int = 60 * 24
+    # JWT 签名密钥与算法；生产环境必须通过环境变量覆盖密钥。
+    jwt_secret_key: str = "change-me-in-production-use-long-random-string"
+    jwt_algorithm: str = "HS256"
+
+    # H5 开发地址，逗号分隔；给 FastAPI CORS 用。
+    cors_origins: str = "http://localhost:9000,http://127.0.0.1:9000"
+
+    # 静态资源：磁盘目录与 URL 挂载前缀。
+    # static_dir 为空时使用包内 static/；也可写成绝对路径或相对项目启动目录的路径。
+    static_dir: str = ""
+    static_url: str = "/static"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+        return origins or ["http://localhost:9000"]
+
+    @property
+    def static_path(self) -> Path:
+        if self.static_dir.strip():
+            path = Path(self.static_dir)
+            return path if path.is_absolute() else Path.cwd() / path
+        return PACKAGE_DIR / "static"
+
+    # 阿里云 OSS，密钥只放 .env，不要写进代码。
+    oss_access_key_id: str = ""
+    oss_access_key_secret: str = ""
+    oss_endpoint: str = "https://oss-cn-beijing.aliyuncs.com"
+    oss_bucket: str = "aliyun-oss-100"
+    oss_public_base_url: str = "https://aliyun-oss-100.oss-cn-beijing.aliyuncs.com"
 
 
 # 整个进程只解析一次配置，后续调用直接返回缓存的 Settings 实例。

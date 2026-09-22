@@ -1,78 +1,113 @@
 """fastapi_app/main.py"""
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
+import fastapi_app.models  # noqa: F401
 from fastapi_app.api.router import api_router
 from fastapi_app.core.config import get_settings
-from fastapi_app.core.db import Base, engine
-from fastapi_app.schemas import ApiResponse
-import fastapi_app.models  # noqa: F401
+from fastapi_app.core.db import Base, SessionLocal, engine
+from fastapi_app.core.exceptions import register_exception_handlers
+from fastapi_app.core.logging import setup_logging
+from fastapi_app.core.openapi import APP_DESCRIPTION, OPENAPI_TAGS, setup_openapi
+from fastapi_app.core.security import hash_password
+from fastapi_app.core.static import register_static_files
+from fastapi_app.crud import users as user_crud
+from fastapi_app.middleware import RequestLoggingMiddleware
+from fastapi_app.schemas.common import ApiResponse
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # 应用生命周期：yield 之前在启动时执行，yield 之后在关闭时执行。
     # Demo only. Prefer Alembic migrations in production.
     try:
-        # 按模型元数据创建缺失的数据表，不会修改已存在的表。
         Base.metadata.create_all(bind=engine)
     except Exception as exc:  # noqa: BLE001
-        # 数据库不可用时跳过建表，避免演示环境启动失败。
         print(f"[warn] skip create_all, check MySQL: {exc}")
-    # 交还控制权给 FastAPI；此处之后可放置关闭时的清理逻辑。
+    _ensure_user_avatar_column()
+    _ensure_demo_user()
     yield
 
 
-def _error_response(code: int, message: str, data: object | None = None) -> JSONResponse:
-    body = ApiResponse.fail(code, message, data)
-    return JSONResponse(status_code=code, content=jsonable_encoder(body.model_dump()))
+def _ensure_user_avatar_column() -> None:
+    try:
+        inspector = inspect(engine)
+        if "users" not in inspector.get_table_names():
+            return
+        columns = {col["name"] for col in inspector.get_columns("users")}
+        if "avatar" in columns:
+            return
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN avatar VARCHAR(512) NULL"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] skip add avatar column: {exc}")
 
 
-def register_exception_handlers(app: FastAPI) -> None:
-    # 业务里 raise 的 HTTPException，改成和成功响应一样的外壳。
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(
-        _request: Request, exc: HTTPException
-    ) -> JSONResponse:
-        if isinstance(exc.detail, str):
-            message, data = exc.detail, None
-        else:
-            message, data = "请求失败", exc.detail
-        response = _error_response(exc.status_code, message, data)
-        if exc.headers:
-            response.headers.update(exc.headers)
-        return response
-
-    # 入参校验失败（缺字段、类型不对）也走同一外壳，明细放在 data 里。
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
-        _request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
-        return _error_response(422, "请求参数校验失败", exc.errors())
+def _ensure_demo_user() -> None:
+    db = SessionLocal()
+    try:
+        if user_crud.get_by_username(db, "demo"):
+            return
+        user_crud.create(
+            db,
+            username="demo",
+            password_hash=hash_password("123456"),
+            nickname="演示用户",
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] skip demo user: {exc}")
+    finally:
+        db.close()
 
 
-# create_app() 读取配置、创建 FastAPI 实例，挂上 /api 路由，并提供 /health 健康检查。
-# 启动时的 lifespan 会调用 Base.metadata.create_all 自动建表（注释写明这只是演示，
-# 正式环境应改用 Alembic 迁移）。模块末尾的 app = create_app() 是 uvicorn 加载的对象。
-def create_app() -> FastAPI:
-    # 读取应用配置（名称、版本等）。
+def register_middlewares(app: FastAPI) -> None:
     settings = get_settings()
-    # 创建 FastAPI 实例，并绑定启动/关闭生命周期。
+    # 后添加的中间件更靠外；日志包住 CORS，便于看到完整请求链路。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|(\d{1,3}\.){3}\d{1,3})(:\d+)?",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(RequestLoggingMiddleware)
+
+
+def create_app() -> FastAPI:
+    setup_logging()
+    settings = get_settings()
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
+        description=APP_DESCRIPTION,
+        openapi_tags=OPENAPI_TAGS,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
         lifespan=lifespan,
+        swagger_ui_parameters={
+            "docExpansion": "list",
+            "defaultModelsExpandDepth": 1,
+            "persistAuthorization": True,
+        },
     )
+    register_middlewares(app)
     register_exception_handlers(app)
-    # 挂载 /api 路由。
     app.include_router(api_router)
+    setup_openapi(app)
+    # 静态目录挂载放在路由之后；注意 mount 是兜底匹配，勿盖住 /api。
+    register_static_files(app)
 
-    # 健康检查：用于探活，不依赖数据库。
-    @app.get("/health", response_model=ApiResponse[dict[str, str]])
+    @app.get(
+        "/health",
+        tags=["健康检查"],
+        summary="根路径健康检查",
+        description="用于容器 / 负载均衡探活，不访问数据库。",
+        response_model=ApiResponse[dict[str, str]],
+    )
     def health() -> ApiResponse[dict[str, str]]:
         return ApiResponse.ok({"status": "ok"})
 

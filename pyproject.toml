@@ -8,9 +8,12 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "bcrypt>=4.0",
     "cryptography>=50.0.1",
     "fastapi[standard]>=0.141.1",
+    "oss2>=2.19.1",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.9",
     "pymysql>=1.2.3",
     "redis>=8.1.0",
     "sqlalchemy>=2.0.54",
