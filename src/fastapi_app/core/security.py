@@ -1,18 +1,27 @@
 """密码哈希与 JWT / OAuth2 工具。"""
+# 导入 UTC、datetime、timedelta 模块
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+# 导入 bcrypt 模块
 import bcrypt
+# 导入 jwt 模块
 import jwt
 from fastapi.security import OAuth2PasswordBearer
 
+# 导入 get_settings 配置
 from fastapi_app.core.config import get_settings
 
-# Swagger「Authorize」走 OAuth2 Password，tokenUrl 指向表单登录接口。
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
+# Swagger「Authorize」走 OAuth2 Password；受保护路由 Depends(oauth2_scheme) 强制带 Bearer。
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
 
 def hash_password(password: str) -> str:
+    """
+    哈希密码
+    :param password: 密码
+    :return: 哈希密码
+    """
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
@@ -36,6 +45,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def is_legacy_password_hash(hashed_password: str) -> bool:
+    """
+    检查密码是否为旧版哈希
+    :param hashed_password: 哈希密码
+    :return: 是否为旧版哈希
+    """
     return bool(hashed_password) and not hashed_password.startswith("$2")
 
 
@@ -63,7 +77,13 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
+    """
+    解码 JWT
+    :param token: JWT
+    :return: 解码后的 JWT
+    """
     settings = get_settings()
+    # 解码 JWT，使用设置的密钥和算法
     return jwt.decode(
         token,
         settings.jwt_secret_key,

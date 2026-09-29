@@ -22,13 +22,10 @@ _CREDENTIALS_EXCEPTION = HTTPException(
 
 
 def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
     db: DbSession,
-    token: Annotated[str | None, Depends(oauth2_scheme)],
 ) -> User:
-    """从 JWT 解析当前用户（OAuth2 Bearer）。"""
-    if not token:
-        raise _CREDENTIALS_EXCEPTION
-
+    """从 JWT Token 中解析当前用户（路由里 Depends 注入即受 JWT 保护）。"""
     try:
         payload = decode_access_token(token)
         subject = payload.get("sub")

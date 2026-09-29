@@ -12,6 +12,10 @@ wheels/
 # Local env
 .env
 
+# 运行日志（保留目录占位）
+logs/*
+!logs/.gitkeep
+
 # 本地上传产物（保留目录占位）
 src/fastapi_app/static/uploads/*
 !src/fastapi_app/static/uploads/.gitkeep

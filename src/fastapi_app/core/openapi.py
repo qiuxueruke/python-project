@@ -1,21 +1,25 @@
 """OpenAPI / Swagger 文档元数据：分组标签与接口说明。"""
 
+# 导入 FastAPI 和 get_openapi 函数
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 APP_DESCRIPTION = """
 ## 概述
 
-统一业务 API。成功时 `code = 0`，失败时 `code` 为 HTTP 状态码，响应外壳为：
+统一业务 API。成功时 `code = 200`，失败时 `code` 为 HTTP 状态码，响应外壳为：
 
 ```json
-{ "code": 0, "message": "success", "data": {} }
+{ "code": 200, "message": "success", "data": {} }
 ```
 
 ## 鉴权（OAuth2 Password + JWT）
 
-1. 调用 `POST /api/auth/login`（JSON）或 `POST /api/auth/token`（表单）获取 JWT
-2. 受保护接口在请求头携带：
+1. 登录 / 注册使用表单：`Content-Type: application/x-www-form-urlencoded`
+   - `POST /api/auth/login`（字段 `username`、`password`）
+   - `POST /api/auth/register`（字段 `username`、`password`）
+   - 或 `POST /api/auth/token`（Swagger Authorize / OAuth2 Password）
+2. 受保护接口依赖 `OAuth2PasswordBearer`，请求头携带：
 
 ```http
 Authorization: Bearer <access_token>
@@ -49,7 +53,7 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "登录模块",
-        "description": "注册、JSON 登录、OAuth2 Password 登录、退出。登录成功后签发 JWT。",
+        "description": "注册与登录使用 x-www-form-urlencoded；登录成功后签发 JWT。",
     },
     {
         "name": "用户信息模块",
@@ -69,18 +73,36 @@ _PROTECTED_PATH_PREFIXES = (
 
 
 def setup_openapi(app: FastAPI) -> None:
+    """
+    设置 OpenAPI
+    :param app: FastAPI 应用
+    :return: None
+    """
     def custom_openapi() -> dict:
+        """
+        自定义 OpenAPI
+        :return: dict
+        """
+        # 如果 OpenAPI 模式已经存在，则返回
         if app.openapi_schema:
             return app.openapi_schema
 
+        # 获取 OpenAPI 模式
         schema = get_openapi(
+            # 应用名称
             title=app.title,
+            # 应用版本
             version=app.version,
+            # 应用描述
             description=app.description,
+            # 路由
             routes=app.routes,
+            # OpenAPI 标签
             tags=OPENAPI_TAGS,
         )
+        # 获取组件
         components = schema.setdefault("components", {})
+        # 获取安全方案
         security_schemes = components.setdefault("securitySchemes", {})
         # 覆盖/补齐：Swagger 可用账号密码直接换 token。
         security_schemes["OAuth2PasswordBearer"] = {
@@ -92,23 +114,29 @@ def setup_openapi(app: FastAPI) -> None:
                 }
             },
         }
+        # 覆盖/补齐：Swagger 可用账号密码直接换 token。
         security_schemes["BearerAuth"] = {
             "type": "http",
             "scheme": "bearer",
             "bearerFormat": "JWT",
             "description": "直接粘贴 JWT（login/token 返回的 access_token）。",
         }
+        # 遍历路径
         for path, methods in schema.get("paths", {}).items():
             if not path.startswith(_PROTECTED_PATH_PREFIXES):
                 continue
+            # 遍历方法
             for operation in methods.values():
                 if isinstance(operation, dict):
+                    # 设置安全
                     operation["security"] = [
                         {"OAuth2PasswordBearer": []},
                         {"BearerAuth": []},
                     ]
 
+        # 设置 OpenAPI 模式
         app.openapi_schema = schema
         return app.openapi_schema
 
+    # 设置 OpenAPI
     app.openapi = custom_openapi  # type: ignore[method-assign]

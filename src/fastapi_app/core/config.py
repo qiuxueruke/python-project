@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     static_dir: str = ""
     static_url: str = "/static"
 
+    # 日志目录；相对路径相对进程启动目录。空字符串表示只打控制台、不写文件。
+    log_dir: str = "logs"
+    # 单个日志文件上限（字节）与保留份数；超出后滚动改名。
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5
+
     @property
     def cors_origin_list(self) -> list[str]:
         origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
